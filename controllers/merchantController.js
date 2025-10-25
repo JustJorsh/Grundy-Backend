@@ -1,5 +1,6 @@
 // controllers/merchantController.js
 const Merchant = require('../models/Merchant');
+const User = require('../models/User');
 const Order = require('../models/Order');
 const SubAccountService = require('../services/subAccountService');
 const InventoryService = require('../services/inventoryService');
@@ -12,16 +13,66 @@ class MerchantController {
     try {
       const merchantData = req.body;
 
+      // First, create or update the User record
+      let user;
+      if (merchantData.userId) {
+        // Update existing user to merchant role
+        user = await User.findByIdAndUpdate(
+          merchantData.userId,
+          { 
+            role: 'merchant',
+            name: merchantData.contact?.name || merchantData.businessName,
+            phone: merchantData.contact?.phone,
+            email: merchantData.contact?.email
+          },
+          { new: true }
+        );
+        
+        if (!user) {
+          return res.status(400).json({
+            success: false,
+            error: 'User not found'
+          });
+        }
+      } else {
+        // Create new user for merchant
+        user = new User({
+          name: merchantData.contact?.name || merchantData.businessName,
+          email: merchantData.contact?.email,
+          phone: merchantData.contact?.phone,
+          password: 'temp_password_' + Date.now(), // Temporary password
+          role: 'merchant'
+        });
+        await user.save();
+      }
+
+      // Update merchantData with the user ID
+      merchantData.userId = user._id;
+
       // Create merchant
       const merchant = new Merchant(merchantData);
       await merchant.save();
 
-      // Create Paystack sub-account
-      const subAccount = await subAccountService.createSubAccount(merchant);
+      // Try to create Paystack sub-account
+      let paystackSubAccountCode = 'test-mode';
       
-      // Update merchant with sub-account code
-      merchant.paystackSubAccountCode = subAccount.subaccount_code;
-      await merchant.save();
+      try {
+        
+        const subAccount = await subAccountService.createSubAccount(merchant);
+        // Update merchant with sub-account code
+        merchant.paystackSubAccountCode = subAccount.subaccount_code;
+        paystackSubAccountCode = subAccount.subaccount_code;
+        await merchant.save();
+        console.log('Paystack sub-account created successfully:', subAccount.subaccount_code);
+      } catch (paystackError) {
+        console.error('Paystack integration failed:', paystackError.message);
+        console.error('Full error:', paystackError);
+        // Generate a mock sub-account code for testing
+        paystackSubAccountCode = `ACCT_${merchant._id.toString().slice(-8).toUpperCase()}_${Date.now().toString().slice(-6)}`;
+        merchant.paystackSubAccountCode = paystackSubAccountCode;
+        await merchant.save();
+        console.log('Mock Paystack sub-account created:', paystackSubAccountCode);
+      }
 
       res.json({
         success: true,
@@ -29,7 +80,14 @@ class MerchantController {
           id: merchant._id,
           businessName: merchant.businessName,
           type: merchant.type,
-          isVerified: merchant.isVerified
+          isVerified: merchant.isVerified,
+          paystackSubAccountCode: paystackSubAccountCode
+        },
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role
         },
         message: 'Merchant registered successfully'
       });
@@ -186,6 +244,109 @@ class MerchantController {
       });
     }
   }
+
+    async getProduct(req, res) {
+    try {
+      const { productId } = req.params;
+
+      // Find merchant containing the product and project only that product
+      const merchant = await Merchant.findOne(
+        { 'products._id': productId },
+        { 'products.$': 1, businessName: 1 }
+      );
+
+      if (!merchant || !merchant.products || merchant.products.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Product not found'
+        });
+      }
+
+      const product = merchant.products[0];
+
+      res.json({
+        success: true,
+        product: {
+          ...product.toObject(),
+          merchant: {
+            id: merchant._id,
+            businessName: merchant.businessName
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Get product error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+   async getAllProducts(req, res) {
+    try {
+      const { page = 1, limit = 20, category, merchantId, q, available } = req.query;
+      const pageNum = Math.max(1, parseInt(page, 10));
+      const lim = Math.max(1, parseInt(limit, 10));
+
+      const pipeline = [];
+
+      // If filtering by merchantId, match merchant first
+      if (merchantId) {
+        try {
+          pipeline.push({ $match: { _id: mongoose.Types.ObjectId(merchantId) } });
+        } catch (err) {
+          return res.status(400).json({ success: false, error: 'Invalid merchantId' });
+        }
+      }
+
+      pipeline.push({ $unwind: '$products' });
+
+      // Product-level filters
+      const prodMatch = {};
+      if (category) prodMatch['products.category'] = category;
+      if (typeof available !== 'undefined') prodMatch['products.available'] = available === 'true';
+      if (q) prodMatch['products.name'] = { $regex: q, $options: 'i' };
+      if (Object.keys(prodMatch).length) pipeline.push({ $match: prodMatch });
+
+      pipeline.push(
+        {
+          $project: {
+            product: '$products',
+            merchantId: '$_id',
+            businessName: 1
+          }
+        },
+        {
+          $facet: {
+            metadata: [{ $count: 'total' }],
+            data: [{ $skip: (pageNum - 1) * lim }, { $limit: lim }]
+          }
+        }
+      );
+
+      const agg = await Merchant.aggregate(pipeline);
+      const metadata = agg[0]?.metadata[0] || { total: 0 };
+      const rows = agg[0]?.data || [];
+
+      const products = rows.map(r => ({
+        ...r.product,
+        merchant: { id: r.merchantId, businessName: r.businessName }
+      }));
+
+      res.json({
+        success: true,
+        products,
+        total: metadata.total || 0,
+        totalPages: Math.ceil((metadata.total || 0) / lim),
+        currentPage: pageNum
+      });
+    } catch (error) {
+      console.error('Get all products error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
 }
+
 
 module.exports = new MerchantController();

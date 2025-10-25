@@ -7,6 +7,10 @@ const { authenticate, authorize } = require('../middleware/auth');
 // Public routes
 router.post('/register', merchantController.registerMerchant);
 
+// Public product retrieval
+router.get('/products/:productId', merchantController.getProduct);
+router.get('/products', merchantController.getAllProducts); 
+
 // Merchant routes
 router.get('/orders', authenticate, authorize(['merchant']), merchantController.getMerchantOrders);
 router.get('/analytics', authenticate, authorize(['merchant']), merchantController.getMerchantAnalytics);

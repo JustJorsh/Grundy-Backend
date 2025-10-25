@@ -10,5 +10,6 @@ router.get('/orders/available', authenticate, authorize(['rider']), riderControl
 router.post('/orders/accept', authenticate, authorize(['rider']), riderController.acceptOrder);
 router.patch('/orders/:orderId/status', authenticate, authorize(['rider']), riderController.updateOrderStatus);
 router.get('/stats', authenticate, authorize(['rider']), riderController.getRiderStats);
+router.post('/onboard', riderController.onboardRider);
 
 module.exports = router;

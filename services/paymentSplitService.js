@@ -25,7 +25,7 @@ class PaymentSplitService {
             share: 90
           }
         ],
-        bearer_type: 'account',
+        bearer_type: 'subaccount',
         main_account_share: 10
       };
 
@@ -47,7 +47,7 @@ class PaymentSplitService {
 
       if (!response.status) {
         throw new Error(`Paystack initialization failed: ${response.message}`);
-      }
+      }x
 
       // Update order with payment details
       await Order.findByIdAndUpdate(order._id, {
@@ -57,7 +57,7 @@ class PaymentSplitService {
           type: 'percentage',
           merchantShare: 90,
           platformShare: 10,
-          bearer: 'platform'
+          bearer: 'subaccount'
         }
       });
 

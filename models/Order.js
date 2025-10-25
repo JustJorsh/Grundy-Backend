@@ -1,4 +1,3 @@
-// models/Order.js
 const mongoose = require('mongoose');
 
 const orderSchema = new mongoose.Schema({
@@ -7,43 +6,40 @@ const orderSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-  customer: {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    email: String,
-    phone: String,
-    name: String,
-    address: {
-      street: String,
-      city: String,
-      state: String,
-      coordinates: {
-        lat: Number,
-        lng: Number
+
+  // --- References --- //
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  merchantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Merchant',
+    required: true
+  },
+  riderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Rider'
+  },
+
+  // --- Simplified Items --- //
+  items: [
+    {
+      productId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product',
+        required: true
+      },
+      quantity: {
+        type: Number,
+        required: true,
+        min: 1
       }
     }
-  },
-  merchant: {
-    merchantId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Merchant',
-      required: true
-    },
-    name: String,
-    marketId: mongoose.Schema.Types.ObjectId,
-    type: String,
-    subAccountCode: String
-  },
-  items: [{
-    productId: mongoose.Schema.Types.ObjectId,
-    name: String,
-    price: Number,
-    quantity: Number,
-    subtotal: Number
-  }],
+  ],
+
+  // --- Payment --- //
   payment: {
     method: {
       type: String,
@@ -58,73 +54,46 @@ const orderSchema = new mongoose.Schema({
     amount: Number,
     platformFee: Number,
     merchantAmount: Number,
-    paystackFee: Number,
-    actualAmount: Number,
     paystackReference: String,
-    splitCode: String,
-    splitConfig: {
-      type: {
-        type: String,
-        enum: ['percentage', 'flat']
-      },
-      merchantShare: Number,
-      platformShare: Number,
-      bearer: String
-    },
-    virtualAccount: {
-      accountNumber: String,
-      bankName: String,
-      accountName: String,
-      dedicatedAccountId: String
-    },
-    terminalSessionId: String,
-    transactionId: String,
-    channel: String,
-    paidAt: Date,
-    merchantPayoutStatus: {
-      type: String,
-      enum: ['pending', 'processing', 'completed', 'failed'],
-      default: 'pending'
-    },
-    merchantPayoutReference: String,
-    merchantPayoutDate: Date,
-    payoutFailureReason: String
+    paidAt: Date
   },
+
+  // --- Delivery --- //
   delivery: {
-    riderId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Rider'
-    },
     status: {
       type: String,
       enum: ['pending', 'assigned', 'picked_up', 'in_transit', 'delivered', 'failed'],
       default: 'pending'
     },
     estimatedDelivery: Date,
-    actualDelivery: Date,
-    riderLocation: {
-      lat: Number,
-      lng: Number
-    },
-    deliveryNotes: String
+    actualDelivery: Date
   },
+
   status: {
     type: String,
-    enum: ['created', 'confirmed', 'preparing', 'ready', 'in_transit', 'delivered', 'cancelled'],
+    enum: ['created', 'confirmed', 'delivered', 'cancelled'],
     default: 'created'
   },
-  notes: String,
-  cancellationReason: String
-}, {
-  timestamps: true
-});
 
-// Indexes for better performance
+  notes: String,
+
+  deliveryAddress: {
+    street: String,
+    city: String,
+    state: String,
+    coordinates: {
+      lat: Number,
+      lng: Number
+    }
+  }
+
+}, { timestamps: true });
+
+// --- Indexes --- //
 orderSchema.index({ orderId: 1 });
-orderSchema.index({ 'customer.userId': 1 });
-orderSchema.index({ 'merchant.merchantId': 1 });
+orderSchema.index({ customerId: 1 });
+orderSchema.index({ merchantId: 1 });
 orderSchema.index({ status: 1 });
-orderSchema.index({ 'payment.status': 1 });
 orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

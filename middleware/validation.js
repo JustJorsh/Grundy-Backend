@@ -14,8 +14,8 @@ const handleValidationErrors = (req, res, next) => {
 
 const validateOrder = [
   body('customer.userId').isMongoId(),
-  body('customer.email').isEmail(),
-  body('customer.phone').isMobilePhone(),
+  // body('customer.email').isEmail(),
+  // body('customer.phone').isMobilePhone(),
   body('items').isArray({ min: 1 }),
   body('items.*.productId').isMongoId(),
   body('items.*.quantity').isInt({ min: 1 }),

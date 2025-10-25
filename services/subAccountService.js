@@ -13,7 +13,7 @@ class SubAccountService {
         business_name: merchantData.businessName,
         settlement_bank: merchantData.bankDetails.bankName,
         account_number: merchantData.bankDetails.accountNumber,
-        percentage_charge: 0, // We handle split manually
+        percentage_charge: 10, 
         description: `Grundy LLC - ${merchantData.type} merchant`,
         primary_contact_email: merchantData.contact.email,
         primary_contact_name: merchantData.businessName,

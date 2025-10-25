@@ -214,6 +214,74 @@ class RiderController {
       });
     }
   }
+
+  async onboardRider(req, res) {
+    try {
+      const riderData = req.body;
+
+      // Create or update associated User
+      let user;
+      if (riderData.userId) {
+        user = await User.findByIdAndUpdate(
+          riderData.userId,
+          {
+            role: 'rider',
+            name: riderData.name || riderData.fullName || riderData.contact?.name,
+            phone: riderData.phone || riderData.contact?.phone,
+            email: riderData.email || riderData.contact?.email
+          },
+          { new: true }
+        );
+
+        if (!user) {
+          return res.status(400).json({ success: false, error: 'User not found' });
+        }
+      } else {
+        user = new User({
+          name: riderData.name || riderData.fullName || (riderData.contact && riderData.contact.name) || 'Rider',
+          email: riderData.email || (riderData.contact && riderData.contact.email),
+          phone: riderData.phone || (riderData.contact && riderData.contact.phone),
+          password: 'temp_password_' + Date.now(),
+          role: 'rider'
+        });
+        await user.save();
+      }
+
+      // Create Rider record
+      const riderPayload = {
+        userId: user._id,
+        vehicle: riderData.vehicle || {},
+        location: riderData.location || { coordinates: { lat: 0, lng: 0 }, lastUpdated: new Date() },
+        status: riderData.status || 'available',
+        totalDeliveries: riderData.totalDeliveries || 0,
+        earnings: riderData.earnings || 0,
+        rating: riderData.rating || 0,
+        ...riderData.extra // optional: pass any other custom fields under extra
+      };
+
+      const rider = new Rider(riderPayload);
+      await rider.save();
+
+      res.json({
+        success: true,
+        rider: {
+          id: rider._id,
+          userId: user._id,
+          status: rider.status
+        },
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        },
+        message: 'Rider onboarded successfully'
+      });
+    } catch (error) {
+      console.error('Onboard rider error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
 }
 
 module.exports = new RiderController();
