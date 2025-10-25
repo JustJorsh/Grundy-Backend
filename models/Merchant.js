@@ -39,10 +39,13 @@ const merchantSchema = new mongoose.Schema({
   paystackSubAccountCode: String,
   products: [{
     name: String,
+    image: {
+      type: String,
+      default: 'https://mcusercontent.com/933f2f0339a6edfcdbb136db1/images/5bfe091d-3610-864b-e153-d395d5ef09dc.jpg'
+    },
     description: String,
     price: Number,
     category: String,
-    image: String,
     stock: Number,
     available: {
       type: Boolean,
