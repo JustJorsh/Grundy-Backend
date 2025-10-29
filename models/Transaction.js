@@ -22,7 +22,7 @@ const transactionSchema = new mongoose.Schema({
   },
   netAmount: {
     type: Number,
-    required: true
+    
   },
   platformFee: {
     type: Number,
