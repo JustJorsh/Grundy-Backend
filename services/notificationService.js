@@ -58,14 +58,12 @@ class NotificationService {
     try {
       const user = await User.findById(userId);
       
-      // Send email
+
       await this.sendEmail(user.email, 'Order Update', data.message);
       
-      // Send SMS
+
       await this.sendSMS(user.phone, data.message);
       
-      // Send push notification
-      await this.sendPushNotification(userId, data);
 
       console.log(`Notification sent to customer: ${user.email}`);
 
@@ -90,7 +88,7 @@ class NotificationService {
 
   async sendRiderNotification(riderId, data) {
     try {
-      // Implementation for rider notifications
+     
       console.log(`Rider notification: ${data.message}`);
     } catch (error) {
       console.error('Error sending rider notification:', error);
@@ -98,19 +96,16 @@ class NotificationService {
   }
 
   async sendEmail(to, subject, message) {
-    // Integration with email service (SendGrid, AWS SES, etc.)
+    // Integration with email service 
     console.log(`Email to ${to}: ${subject} - ${message}`);
   }
 
   async sendSMS(to, message) {
-    // Integration with SMS service (Twilio, etc.)
+    // Integration with SMS service 
     console.log(`SMS to ${to}: ${message}`);
   }
 
-  async sendPushNotification(userId, data) {
-    // Integration with push notification service (Firebase, etc.)
-    console.log(`Push notification to user ${userId}:`, data);
-  }
+ 
 
   async sendAdminAlert(subject, message) {
     // Send critical alerts to admin team

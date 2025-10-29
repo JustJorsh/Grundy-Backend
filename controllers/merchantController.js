@@ -4,6 +4,8 @@ const User = require('../models/User');
 const Order = require('../models/Order');
 const SubAccountService = require('../services/subAccountService');
 const InventoryService = require('../services/inventoryService');
+const jwt = require('jsonwebtoken'); 
+const bcrypt = require('bcryptjs'); 
 
 const subAccountService = new SubAccountService();
 const inventoryService = new InventoryService();
@@ -13,10 +15,10 @@ class MerchantController {
     try {
       const merchantData = req.body;
 
-      // First, create or update the User record
+
       let user;
       if (merchantData.userId) {
-        // Update existing user to merchant role
+     
         user = await User.findByIdAndUpdate(
           merchantData.userId,
           { 
@@ -35,15 +37,28 @@ class MerchantController {
           });
         }
       } else {
+        // Generate a random password if not provided
+        const password = merchantData.password || 'temp_pass';
+        
+        // Hash password before creating user
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         // Create new user for merchant
         user = new User({
           name: merchantData.contact?.name || merchantData.businessName,
           email: merchantData.contact?.email,
           phone: merchantData.contact?.phone,
-          password: 'temp_password_' + Date.now(), // Temporary password
+          password: hashedPassword,
           role: 'merchant'
         });
         await user.save();
+
+        // Don't send the hashed password in response, but send the original password
+        // if it was auto-generated (so merchant can login first time)
+        if (!merchantData.password) {
+          merchantData.generatedPassword = password;
+        }
       }
 
       // Update merchantData with the user ID
@@ -89,6 +104,11 @@ class MerchantController {
           email: user.email,
           role: user.role
         },
+        // Only include generated password if one was created
+        ...(merchantData.generatedPassword && {
+          temporaryPassword: merchantData.generatedPassword,
+          message: 'Please change this temporary password on first login'
+        }),
         message: 'Merchant registered successfully'
       });
 
@@ -97,6 +117,88 @@ class MerchantController {
       res.status(500).json({
         success: false,
         error: error.message
+      });
+    }
+  }
+
+  async loginMerchant(req, res) {
+    try {
+      const { email, password } = req.body;
+      
+      // Validate input
+      if (!email || !password) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Email and password are required' 
+        });
+      }
+
+      // Find user and check role
+      const user = await User.findOne({ 
+        email: email.toLowerCase(),
+        role: 'merchant'
+      });
+
+      if (!user) {
+        return res.status(401).json({ 
+          success: false, 
+          error: 'Invalid credentials' 
+        });
+      }
+
+      // Verify password using bcrypt
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ 
+          success: false, 
+          error: 'Invalid credentials' 
+        });
+      }
+
+      // Get associated merchant details
+      const merchant = await Merchant.findOne({ userId: user._id });
+      if (!merchant) {
+        return res.status(404).json({ 
+          success: false, 
+          error: 'Merchant account not found' 
+        });
+      }
+
+      // Generate JWT token
+      const token = jwt.sign(
+        { 
+          id: user._id, 
+          role: user.role, 
+          merchantId: merchant._id 
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      );
+
+      // Send success response
+      res.json({
+        success: true,
+        token,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role
+        },
+        merchant: {
+          id: merchant._id,
+          businessName: merchant.businessName,
+          isVerified: merchant.isVerified,
+          type: merchant.type
+        }
+      });
+
+    } catch (error) {
+      console.error('Merchant login error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || 'Login failed' 
       });
     }
   }
@@ -291,7 +393,6 @@ class MerchantController {
 
       const pipeline = [];
 
-      // If filtering by merchantId, match merchant first
       if (merchantId) {
         try {
           pipeline.push({ $match: { _id: mongoose.Types.ObjectId(merchantId) } });
@@ -302,7 +403,7 @@ class MerchantController {
 
       pipeline.push({ $unwind: '$products' });
 
-      // Product-level filters
+     
       const prodMatch = {};
       if (category) prodMatch['products.category'] = category;
       if (typeof available !== 'undefined') prodMatch['products.available'] = available === 'true';
@@ -346,7 +447,67 @@ class MerchantController {
       res.status(500).json({ success: false, error: error.message });
     }
   }
-}
 
+  async getMerchantProducts(req, res) {
+    try {
+      const { page = 1, limit = 20, category, available, q } = req.query;
+      const merchantId = req.params.merchantId || req.user.merchantId;
+
+      const merchant = await Merchant.findById(merchantId);
+      if (!merchant) {
+        return res.status(404).json({
+          success: false,
+          error: 'Merchant not found'
+        });
+      }
+
+      let products = merchant.products || [];
+
+
+      if (category) {
+        products = products.filter(p => p.category === category);
+      }
+      if (typeof available !== 'undefined') {
+        products = products.filter(p => p.available === (available === 'true'));
+      }
+      if (q) {
+        const searchRegex = new RegExp(q, 'i');
+        products = products.filter(p => 
+          searchRegex.test(p.name) || 
+          searchRegex.test(p.description)
+        );
+      }
+
+      const total = products.length;
+      const pageNum = Math.max(1, parseInt(page));
+      const pageSize = Math.max(1, parseInt(limit));
+      const startIndex = (pageNum - 1) * pageSize;
+      const endIndex = startIndex + pageSize;
+
+      
+      const paginatedProducts = products.slice(startIndex, endIndex);
+
+      res.json({
+        success: true,
+        products: paginatedProducts,
+        merchant: {
+          id: merchant._id,
+          businessName: merchant.businessName,
+          type: merchant.type
+        },
+        total,
+        totalPages: Math.ceil(total / pageSize),
+        currentPage: pageNum
+      });
+
+    } catch (error) {
+      console.error('Get merchant products error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+}
 
 module.exports = new MerchantController();

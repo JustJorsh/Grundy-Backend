@@ -62,7 +62,7 @@ class PaymentController {
       const { sessionId } = req.body;
       const { riderId } = req.user; // Assuming rider is authenticated
 
-      const result = await terminalPaymentService.processTerminalPayment(sessionId, {
+      const result = await terminalPaymentService.processVirtualTerminalPayment(sessionId, {
         riderId: riderId,
         timestamp: new Date()
       });

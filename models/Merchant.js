@@ -37,6 +37,7 @@ const merchantSchema = new mongoose.Schema({
     accountName: String
   },
   paystackSubAccountCode: String,
+ 
   products: [{
     name: String,
     image: {

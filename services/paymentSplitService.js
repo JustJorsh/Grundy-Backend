@@ -1,62 +1,68 @@
 // services/paymentSplitService.js
 const Paystack = require('paystack')(process.env.PAYSTACK_SECRET_KEY);
-const SplitConfig = require('../models/SplitConfig');
 const Order = require('../models/Order');
 const Merchant = require('../models/Merchant');
 const Transaction = require('../models/Transaction');
+const User = require('../models/User');
+
 
 class PaymentSplitService {
   constructor() {
     this.paystack = Paystack;
+    this.paystackKey = process.env.PAYSTACK_SECRET_KEY;
   }
 
   async initializePaymentWithSplit(order, merchant) {
     try {
+
+      let customer = await User.findById(order.customerId);
+      let merchant = await Merchant.findById(order.merchantId);
+      console.log(customer)
+      console.log(merchant)
       if (!merchant.paystackSubAccountCode) {
         throw new Error('Merchant does not have a Paystack sub-account');
       }
 
-      const splitConfig = {
-        type: 'percentage',
-        currency: 'NGN',
-        subaccounts: [
-          {
-            subaccount: merchant.paystackSubAccountCode,
-            share: 90
-          }
-        ],
-        bearer_type: 'subaccount',
-        main_account_share: 10
-      };
+   
+      const merchantSharePercent = 90;
+      const platformSharePercent = 10;
 
-      const splitCode = await this.getOrCreateSplitCode(splitConfig, merchant._id);
 
-      const response = await this.paystack.transaction.initialize({
-        email: order.customer.email,
-        amount: order.payment.amount * 100,
+      
+
+
+      const payload = {
+        email: customer.email,
+        amount: Math.round(order.payment.amount * 100),
         reference: order.orderId,
         callback_url: `${process.env.FRONTEND_URL}/payment/verify`,
+        subaccount: merchant.paystackSubAccountCode,
+        bearer: 'subaccount',
         metadata: {
           order_id: order.orderId,
-          customer_id: order.customer.userId,
+          customer_id: customer._id.toString(),
           merchant_id: merchant._id.toString(),
-          split_config: 'active',
-          split_code: splitCode
+          merchantSharePercent,
+          platformSharePercent
         }
-      });
+      };
 
-      if (!response.status) {
-        throw new Error(`Paystack initialization failed: ${response.message}`);
-      }x
+      console.log("PAYLOAD", payload)
+
+      const response = await this.paystack.transaction.initialize(payload);
+
+      if (!response || response.status !== true) {
+        throw new Error(`Paystack initialization failed: ${response?.message || 'no response'}`);
+      }
 
       // Update order with payment details
       await Order.findByIdAndUpdate(order._id, {
         'payment.paystackReference': response.data.reference,
-        'payment.splitCode': splitCode,
+        'payment.subaccount': merchant.paystackSubAccountCode,
         'payment.splitConfig': {
-          type: 'percentage',
-          merchantShare: 90,
-          platformShare: 10,
+          type: 'subaccount',
+          merchantSharePercent,
+          platformSharePercent,
           bearer: 'subaccount'
         }
       });
@@ -69,7 +75,7 @@ class PaymentSplitService {
         platformFee: order.payment.platformFee,
         merchantAmount: order.payment.merchantAmount,
         merchantId: merchant._id,
-        splitCode: splitCode,
+        subaccount: merchant.paystackSubAccountCode,
         status: 'pending'
       });
 
@@ -82,47 +88,6 @@ class PaymentSplitService {
     } catch (error) {
       console.error('Split payment initialization error:', error);
       throw new Error(`Split payment initialization failed: ${error.message}`);
-    }
-  }
-
-  async getOrCreateSplitCode(splitConfig, merchantId) {
-    try {
-      const existingSplit = await SplitConfig.findOne({
-        merchantId: merchantId,
-        'config.subaccounts.subaccount': splitConfig.subaccounts[0].subaccount,
-        isActive: true
-      });
-
-      if (existingSplit) {
-        return existingSplit.splitCode;
-      }
-
-      const response = await this.paystack.transaction.split({
-        name: `Grundy-Merchant-${merchantId}-${Date.now()}`,
-        type: splitConfig.type,
-        currency: splitConfig.currency,
-        subaccounts: splitConfig.subaccounts,
-        bearer_type: splitConfig.bearer_type
-      });
-
-      if (!response.status) {
-        throw new Error(`Paystack split creation failed: ${response.message}`);
-      }
-
-      const newSplit = new SplitConfig({
-        splitCode: response.data.split_code,
-        name: response.data.name,
-        config: splitConfig,
-        merchantId: merchantId,
-        isActive: true
-      });
-
-      await newSplit.save();
-      return response.data.split_code;
-
-    } catch (error) {
-      console.error('Error creating split code:', error);
-      throw new Error(`Split code creation failed: ${error.message}`);
     }
   }
 
@@ -178,7 +143,7 @@ class PaymentSplitService {
         }
       );
 
-      // Notify parties
+      
       await this.notifyPaymentSuccess(order);
 
       return order;
@@ -192,9 +157,7 @@ class PaymentSplitService {
   async notifyPaymentSuccess(order) {
     // Implementation for sending notifications
     console.log(`Payment successful for order: ${order.orderId}`);
-    
-    // Here you would integrate with your notification service
-    // to send emails, SMS, or push notifications to customer and merchant
+ 
   }
 
   async handleWebhookEvent(event) {

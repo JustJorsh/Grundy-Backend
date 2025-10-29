@@ -7,14 +7,13 @@ const TerminalPaymentService = require('../services/terminalPaymentService');
 const InventoryService = require('../services/inventoryService');
 const NotificationService = require('../services/notificationService');
 
-// Instantiate services once
 const paymentSplitService = new PaymentSplitService();
 const virtualAccountService = new VirtualAccountService();
 const terminalPaymentService = new TerminalPaymentService();
 const inventoryService = new InventoryService();
 const notificationService = new NotificationService();
 
-// --- Utility Functions --- //
+
 
 function calculatePaystackFee(amount) {
   try {
@@ -34,8 +33,10 @@ function calculateEstimatedDelivery() {
   return deliveryTime;
 }
 
-async function assignMerchant(productIds) {
+async function assignMerchant(products) {
   try {
+    const productIds = products.map(item => item.productId);
+    console.log('Assigning merchant for products:', productIds);
     const merchant = await Merchant.findOne({
       'products._id': { $in: productIds },
       isActive: true
@@ -44,6 +45,58 @@ async function assignMerchant(productIds) {
   } catch (error) {
     console.error('Error assigning merchant:', error);
     return null;
+  }
+}
+async function computeOrderTotals(items, merchant) {
+  try {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error('No items provided for total computation');
+    }
+    if (!merchant) {
+      throw new Error('Merchant is required to compute totals');
+    }
+
+    const detailed = [];
+    let subtotal = 0;
+
+    for (const it of items) {
+      const productId = it.productId;
+      const qty = Number(it.quantity || 1);
+
+      // find product in merchant catalog
+      const prod = merchant.products.find(p => String(p._id) === String(productId));
+      if (!prod) {
+        throw new Error(`Product ${productId} not found for merchant ${merchant._id}`);
+      }
+
+      const price = Number(prod.price || 0);
+      const lineTotal = price * qty;
+      detailed.push({
+        productId,
+        name: prod.name,
+        price,
+        quantity: qty,
+        lineTotal
+      });
+      subtotal += lineTotal;
+    }
+
+    // platform & fees (same logic as existing controller)
+    const platformFee = +(subtotal * 0.10).toFixed(2);
+    const paystackFee = calculatePaystackFee(subtotal);
+    const merchantAmount = +(subtotal - platformFee - paystackFee).toFixed(2);
+
+    return {
+      items: detailed,
+      subtotal: +subtotal.toFixed(2),
+      totalAmount: +subtotal.toFixed(2),
+      platformFee,
+      paystackFee,
+      merchantAmount
+    };
+  } catch (err) {
+    console.error('computeOrderTotals error:', err.message);
+    throw err;
   }
 }
 
@@ -66,7 +119,7 @@ async function processRefund(order) {
 
 async function createOrder(req, res) {
   try {
-    const { customer, items, paymentMethod, deliveryAddress, notes, totalAmount } = req.body;
+    const { customer, items, paymentMethod, deliveryAddress, notes } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -119,17 +172,20 @@ async function createOrder(req, res) {
       });
     }
 
-    const paystackFee = calculatePaystackFee(totalAmount);
-    const platformFee = totalAmount * 0.10;
+    const totals = await computeOrderTotals(items, merchant);
+    const totalAmount = totals.totalAmount;
+    const paystackFee = totals.paystackFee;
+    const platformFee = totals.platformFee;
 
     const order = new Order({
-      orderId: `GRUNDY_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+
+      orderId: `GRUNDY_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       customerId: user ? user._id : null, // Allow null for true guest checkout
       merchantId: merchant._id,
       items: items, 
       payment: {
         method: paymentMethod,
-        status: paymentMethod === 'online' ? 'pending' : 'awaiting_payment',
+        status: paymentMethod === 'online' ? 'pending' : 'awaiting_payment',  
         amount: totalAmount,
         platformFee: platformFee,
         merchantAmount: totalAmount - platformFee - paystackFee,
@@ -158,7 +214,7 @@ async function createOrder(req, res) {
         paymentData = await virtualAccountService.createVirtualAccountForOrder(order, merchant);
         break;
       case 'terminal_delivery':
-        paymentData = await terminalPaymentService.createTerminalSession(order, merchant);
+        paymentData = await terminalPaymentService.createVirtualTerminalForOrder(order, merchant);
         break;
       default:
         throw new Error('Invalid payment method');
