@@ -35,7 +35,7 @@ class PaymentSplitService {
         email: customer.email,
         amount: Math.round(order.payment.amount * 100),
         reference: order.orderId,
-        callback_url: `${process.env.FRONTEND_URL}/payment/verify`,
+        callback_url: `${process.env.FRONTEND_URL}/track-order/${order.orderId}`,
         subaccount: merchant.paystackSubAccountCode,
         bearer: 'subaccount',
         metadata: {
