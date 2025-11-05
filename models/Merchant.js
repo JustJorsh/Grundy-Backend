@@ -53,7 +53,7 @@ const merchantSchema = new mongoose.Schema({
       default: true
     },
     unit: String
-  }],
+  },],
   rating: {
     type: Number,
     default: 0

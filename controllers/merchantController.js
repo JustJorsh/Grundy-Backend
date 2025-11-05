@@ -46,8 +46,8 @@ class MerchantController {
         // Create new user for merchant
         user = new User({
           name: merchantData.contact?.name || merchantData.businessName,
-          email: merchantData.contact?.email,
-          phone: merchantData.contact?.phone,
+          email: merchantData.email,
+          phone: merchantData.phone,
           password: hashedPassword,
           role: 'merchant',
         });
@@ -273,11 +273,13 @@ class MerchantController {
 
   async updateProduct(req, res) {
     try {
-      const merchantId = req.user.merchantId;
+       const userId = req.user._id;
+      const merchant = await Merchant.findOne({ userId: userId });
+      
+
       const { productId } = req.params;
       const updates = req.body;
 
-      const merchant = await Merchant.findById(merchantId);
       const product = merchant.products.id(productId);
 
       if (!product) {
@@ -306,7 +308,10 @@ class MerchantController {
 
   async addProduct(req, res) {
     try {
-      const merchantId = req.user.merchantId;
+      const userId = req.user._id;
+
+      const merchantId = await Merchant.findOne({ userId: userId });
+    
       const productData = req.body;
 
       const product = await inventoryService.addProduct(
@@ -330,19 +335,22 @@ class MerchantController {
 
   async getMerchantAnalytics(req, res) {
     try {
-      const merchantId = req.user.merchantId;
+       const userId = req.user
+
+      const merchant = await Merchant.findOne({ userId: userId });
+
 
       const totalOrders = await Order.countDocuments({
-        'merchant.merchantId': merchantId,
+        'merchant.merchantId': merchant._id,
       });
       const completedOrders = await Order.countDocuments({
-        'merchant.merchantId': merchantId,
+        'merchant.merchantId': merchant._id,
         status: 'delivered',
       });
       const totalRevenue = await Order.aggregate([
         {
           $match: {
-            'merchant.merchantId': merchantId,
+            'merchant.merchantId': merchant._id,
             'payment.status': 'paid',
           },
         },
@@ -350,7 +358,7 @@ class MerchantController {
       ]);
 
       const recentOrders = await Order.find({
-        'merchant.merchantId': merchantId,
+        'merchant.merchantId': merchant._id,
       })
         .sort({ createdAt: -1 })
         .limit(5)

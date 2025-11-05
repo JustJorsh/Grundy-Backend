@@ -78,7 +78,11 @@ class InventoryService {
 
   async addProduct(merchantId, productData) {
     try {
+      console.log(merchantId, productData);
       const merchant = await Merchant.findById(merchantId);
+      if (!merchant.products) {
+        merchant.products = [];
+      }
       merchant.products.push(productData);
       await merchant.save();
       

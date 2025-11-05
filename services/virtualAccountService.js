@@ -2,6 +2,9 @@
 const Paystack = require('paystack')(process.env.PAYSTACK_SECRET_KEY);
 const axios = require('axios');
 const Order = require('../models/Order');
+const User = require('../models/User');
+const Merchant = require('../models/Merchant');
+
 const PaymentSplitService = require('./paymentSplitService');
 
 class VirtualAccountService {
@@ -17,26 +20,33 @@ class VirtualAccountService {
         throw new Error('Merchant does not have a Paystack sub-account');
       }
 
+            let customer = await User.findById(order.customerId);
+    
+
       const merchantSharePercent = 90;
       const platformSharePercent = 10;
 
-      const payload = {
-        customer: {
-          email: order.customer.email,
-          phone: order.customer.phone,
-          first_name: order.customer.name?.split(' ')[0] || 'Customer',
-          last_name: order.customer.name?.split(' ')[1] || ''
-        },
-        preferred_bank: "wema-bank",
-        metadata: {
-          order_id: order.orderId,
-          merchant_id: merchant._id.toString(),
-          subaccount: merchant.paystackSubAccountCode,
-          bearer: 'subaccount',
-          merchantSharePercent,
-          platformSharePercent
-        }
-      };
+      const payload = { customer: 481193, 
+        preferred_bank:"wema-bank"
+      }
+
+      // const payload = {
+      //   customer: {
+      //     email: customer.email,
+      //     phone: customer.phone,
+      //     first_name: customer.name?.split(' ')[0] || 'Customer',
+      //     last_name: customer.name?.split(' ')[1] || ''
+      //   },
+      //   preferred_bank: "test-bank",
+      //   metadata: {
+      //     order_id: order.orderId,
+      //     merchant_id: merchant._id.toString(),
+      //     subaccount: merchant.paystackSubAccountCode,
+      //     bearer: 'subaccount',
+      //     merchantSharePercent,
+      //     platformSharePercent
+      //   }
+      // };
 
       let response;
       

@@ -45,24 +45,31 @@ class VirtualTerminalService {
 
       // reate a virtual terminal for this merchant if it doesn't exist
       let terminalCode = merchant.virtualTerminalCode;
+      let merchantData = await Merchant.findById(order.merchantId);
+      let user = await User.findById(merchantData.userId);
+
+      console.log("USER", user)
+          
       
       if (!terminalCode) {
         const terminalPayload = {
-          name: `${merchant.businessName} - Order ${order.orderId}`,
-          destinations: merchant.notificationPhone ? [
+          name: `${order.orderId}`,
+          destinations: user.phone ? [
             {
-              target: merchant.notificationPhone,
-              name: `${merchant.businessName} Notifications`,
+              target: user.phone,
+              name: `${merchantData.businessName.slice(0, 15)} Notifications`,
             }
           ] : [],
-          metadata: JSON.stringify({
+          metadata: {
             order_id: order.orderId,
             merchant_id: merchant._id.toString(),
-            customer_id: customer._id.toString(),
+            customer_id: order.customerId.toString(),
             type: 'order_payment'
-          }),
+          },
           currency: merchant.currency || 'NGN',
         };
+
+        
 
         const terminalResponse = await this.makePaystackRequest('POST', '/virtual_terminal', terminalPayload);
         

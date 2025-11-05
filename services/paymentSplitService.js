@@ -17,8 +17,7 @@ class PaymentSplitService {
 
       let customer = await User.findById(order.customerId);
       let merchant = await Merchant.findById(order.merchantId);
-      console.log(customer)
-      console.log(merchant)
+      
       if (!merchant.paystackSubAccountCode) {
         throw new Error('Merchant does not have a Paystack sub-account');
       }
