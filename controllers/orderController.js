@@ -2,13 +2,13 @@ const Order = require('../models/Order');
 const Merchant = require('../models/Merchant');
 const User = require('../models/User');
 const PaymentSplitService = require('../services/paymentSplitService');
-const VirtualAccountService = require('../services/virtualAccountService');
+const BankTransferService = require('../services/bankTransferService');
 const TerminalPaymentService = require('../services/terminalPaymentService');
 const InventoryService = require('../services/inventoryService');
 const NotificationService = require('../services/notificationService');
 
 const paymentSplitService = new PaymentSplitService();
-const virtualAccountService = new VirtualAccountService();
+const bankTransferService = new BankTransferService();
 const terminalPaymentService = new TerminalPaymentService();
 const inventoryService = new InventoryService();
 const notificationService = new NotificationService();
@@ -208,10 +208,10 @@ async function createOrder(req, res) {
     let paymentData;
     switch (paymentMethod) {
       case 'online':
-        paymentData = await paymentSplitService.initializePaymentWithSplit(order, merchant);
+        paymentData = await paymentSplitService.initializePaymentWithSplit(order, merchant, "payWithCard");
         break;
       case 'bank_transfer_delivery':
-        paymentData = await virtualAccountService.createVirtualAccountForOrder(order, merchant);
+        paymentData = await bankTransferService.createVirtualAccountForOrder(order, merchant, "payWithTransfer");
         break;
       case 'terminal_delivery':
         paymentData = await terminalPaymentService.createVirtualTerminalForOrder(order, merchant);
@@ -220,6 +220,7 @@ async function createOrder(req, res) {
         throw new Error('Invalid payment method');
     }
 
+    console.log('Order created successfully:', paymentData);
     await notificationService.sendOrderNotification(order, 'created');
 
     res.json({

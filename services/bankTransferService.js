@@ -1,4 +1,4 @@
-// services/virtualAccountService.js
+// services/bankTransferService.js
 const Paystack = require('paystack')(process.env.PAYSTACK_SECRET_KEY);
 const axios = require('axios');
 const Order = require('../models/Order');
@@ -7,57 +7,56 @@ const Merchant = require('../models/Merchant');
 
 const PaymentSplitService = require('./paymentSplitService');
 
-class VirtualAccountService {
+class BankTransferService {
   constructor() {
     this.paystack = Paystack;
     this.paystackKey = process.env.PAYSTACK_SECRET_KEY;
     this.paymentSplitService = new PaymentSplitService();
   }
 
-  async createVirtualAccountForOrder(order, merchant) {
+  async createVirtualAccountForOrder(order, merchant, paymentType) {
     try {
-      if (!merchant.paystackSubAccountCode) {
-        throw new Error('Merchant does not have a Paystack sub-account');
-      }
-
-            let customer = await User.findById(order.customerId);
-    
-
-      const merchantSharePercent = 90;
-      const platformSharePercent = 10;
-
-      const payload = { customer: 481193, 
-        preferred_bank:"wema-bank"
-      }
-
-      // const payload = {
-      //   customer: {
-      //     email: customer.email,
-      //     phone: customer.phone,
-      //     first_name: customer.name?.split(' ')[0] || 'Customer',
-      //     last_name: customer.name?.split(' ')[1] || ''
-      //   },
-      //   preferred_bank: "test-bank",
-      //   metadata: {
-      //     order_id: order.orderId,
-      //     merchant_id: merchant._id.toString(),
-      //     subaccount: merchant.paystackSubAccountCode,
-      //     bearer: 'subaccount',
-      //     merchantSharePercent,
-      //     platformSharePercent
-      //   }
-      // };
-
-      let response;
+       let customer = await User.findById(order.customerId);
+            let merchant = await Merchant.findById(order.merchantId);
+            
+            if (!merchant.paystackSubAccountCode) {
+              throw new Error('Merchant does not have a Paystack sub-account');
+            }
       
-        if (!this.paystackKey) throw new Error('PAYSTACK_SECRET_KEY not configured');
-        const resp = await axios.post('https://api.paystack.co/dedicated_account', payload, {
-          headers: {
-            Authorization: `Bearer ${this.paystackKey}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        response = resp.data;
+         
+            const merchantSharePercent = 90;
+            const platformSharePercent = 10;
+            let channel;
+      
+            if (paymentType === "payWithCard") {
+              channel = 'card';
+            } else if (paymentType === "payWithTransfer") {
+              channel = 'bank_transfer';
+            } else {
+              throw new Error('Invalid payment type specified');
+            }
+            
+      
+      
+            const payload = {
+              email: customer.email,
+              amount: Math.round(order.payment.amount * 100),
+              reference: order.orderId,
+              callback_url: `${process.env.FRONTEND_URL}/track-order?orderId=${order.orderId}`,
+              subaccount: merchant.paystackSubAccountCode,
+              bearer: 'subaccount',
+              channels: [channel],
+              metadata: {
+                order_id: order.orderId,
+                customer_id: customer._id.toString(),
+                merchant_id: merchant._id.toString(),
+                merchantSharePercent,
+                platformSharePercent
+              }
+            };
+   
+      
+            const response = await this.paystack.transaction.initialize(payload);
       
 
       if (!response || response.status !== true) {
@@ -68,13 +67,7 @@ class VirtualAccountService {
 
       // Update order with virtual account details and subaccount metadata
       await Order.findByIdAndUpdate(order._id, {
-        'payment.virtualAccount': {
-          accountNumber: vaData.account_number || vaData?.account_number,
-          bankName: vaData.bank?.name || vaData?.bank,
-          accountName: vaData.account_name || vaData?.account_name,
-          dedicatedAccountId: vaData.id || vaData?.id,
-          metadata: payload.metadata
-        },
+        'payment.paystackReference': response.data.reference,
         'payment.subaccount': merchant.paystackSubAccountCode,
         'payment.splitConfig': {
           type: 'subaccount',
@@ -86,11 +79,17 @@ class VirtualAccountService {
       });
 
       return {
-        accountNumber: vaData.account_number || vaData?.account_number,
-        bankName: vaData.bank?.name || vaData?.bank,
-        accountName: vaData.account_name || vaData?.account_name,
-        instructions: `Transfer exactly ₦${order.payment.amount} to this account. Payment will be automatically verified.`
-      };
+         
+        authorization_url: response.data.authorization_url,
+        reference: response.data.reference,
+        access_code: response.data.access_code
+      }
+      // \\
+      //   accountNumber: vaData.account_number || vaData?.account_number,
+      //   bankName: vaData.bank?.name || vaData?.bank,
+      //   accountName: vaData.account_name || vaData?.account_name,
+      //   instructions: `Transfer exactly ₦${order.payment.amount} to this account. Payment will be automatically verified.`
+      // };
 
     } catch (error) {
       console.error('Virtual account creation error:', error);
@@ -137,4 +136,4 @@ class VirtualAccountService {
   }
 }
 
-module.exports = VirtualAccountService;
+module.exports = BankTransferService;

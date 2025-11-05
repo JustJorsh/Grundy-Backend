@@ -16,6 +16,7 @@ class MerchantController {
     try {
       const merchantData = req.body;
 
+
       let user;
       if (merchantData.userId) {
         user = await User.findByIdAndUpdate(
@@ -71,6 +72,9 @@ class MerchantController {
       let paystackSubAccountCode = 'test-mode';
 
       try {
+      console.log('Registering merchant with data:', merchant);
+
+
         const subAccount = await subAccountService.createSubAccount(merchant);
         // Update merchant with sub-account code
         merchant.paystackSubAccountCode = subAccount.subaccount_code;
@@ -82,18 +86,7 @@ class MerchantController {
         );
       } catch (paystackError) {
         console.error('Paystack integration failed:', paystackError.message);
-        console.error('Full error:', paystackError);
-        // Generate a mock sub-account code for testing
-        paystackSubAccountCode = `ACCT_${merchant._id
-          .toString()
-          .slice(-8)
-          .toUpperCase()}_${Date.now().toString().slice(-6)}`;
-        merchant.paystackSubAccountCode = paystackSubAccountCode;
-        await merchant.save();
-        console.log(
-          'Mock Paystack sub-account created:',
-          paystackSubAccountCode
-        );
+      
       }
 
       res.json({
@@ -476,6 +469,8 @@ class MerchantController {
       const agg = await Merchant.aggregate(pipeline);
       const metadata = agg[0]?.metadata[0] || { total: 0 };
       const rows = agg[0]?.data || [];
+
+      
 
       const products = rows.map((r) => ({
         ...r.product,

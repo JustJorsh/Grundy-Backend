@@ -1,6 +1,8 @@
 // services/subAccountService.js
 const Paystack = require('paystack')(process.env.PAYSTACK_SECRET_KEY);
 const Merchant = require('../models/Merchant');
+const User = require('../models/User');
+
 
 class SubAccountService {
   constructor() {
@@ -9,15 +11,19 @@ class SubAccountService {
 
   async createSubAccount(merchantData) {
     try {
+
+      console.log('Creating sub-account for merchant:', merchantData);
+
+      let user = await User.findById(merchantData.userId);
       const response = await this.paystack.subaccount.create({
         business_name: merchantData.businessName,
         settlement_bank: merchantData.bankDetails.bankName,
         account_number: merchantData.bankDetails.accountNumber,
         percentage_charge: 10, 
         description: `Grundy LLC - ${merchantData.type} merchant`,
-        primary_contact_email: merchantData.contact.email,
-        primary_contact_name: merchantData.businessName,
-        primary_contact_phone: merchantData.contact.phone,
+        primary_contact_email: user.email,
+        primary_contact_name: user.name,
+        primary_contact_phone: user.phone,
         metadata: {
           merchant_id: merchantData._id.toString(),
           type: merchantData.type

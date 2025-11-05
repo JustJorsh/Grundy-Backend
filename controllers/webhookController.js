@@ -1,11 +1,11 @@
 // controllers/webhookController.js
 const PaymentSplitService = require('../services/paymentSplitService');
-const VirtualAccountService = require('../services/virtualAccountService');
+const BankTransferService = require('../services/bankTransferService');
 const TerminalPaymentService = require('../services/terminalPaymentService');
 const WebhookEventLog = require('../models/Webhook');
 
 const paymentSplitService = new PaymentSplitService();
-const virtualAccountService = new VirtualAccountService();
+const bankTransferService = new BankTransferService();
 const terminalPaymentService = new TerminalPaymentService();
 
 class WebhookController {
@@ -51,7 +51,7 @@ class WebhookController {
           break;
 
         case 'dedicatedaccount.transaction':
-          await virtualAccountService.handleVirtualAccountWebhook(event);
+          await bankTransferService.handleVirtualAccountWebhook(event);
           break;
 
         case 'terminal.payment.success':

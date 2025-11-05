@@ -12,7 +12,7 @@ class PaymentSplitService {
     this.paystackKey = process.env.PAYSTACK_SECRET_KEY;
   }
 
-  async initializePaymentWithSplit(order, merchant) {
+  async initializePaymentWithSplit(order, merchant, paymentType) {
     try {
 
       let customer = await User.findById(order.customerId);
@@ -25,8 +25,15 @@ class PaymentSplitService {
    
       const merchantSharePercent = 90;
       const platformSharePercent = 10;
+      let channel;
 
-
+      if (paymentType === "payWithCard") {
+        channel = 'card';
+      } else if (paymentType === "payWithTransfer") {
+        channel = 'bank_transfer';
+      } else {
+        throw new Error('Invalid payment type specified');
+      }
       
 
 
@@ -34,9 +41,10 @@ class PaymentSplitService {
         email: customer.email,
         amount: Math.round(order.payment.amount * 100),
         reference: order.orderId,
-        callback_url: `${process.env.FRONTEND_URL}/track-order/${order.orderId}`,
+        callback_url: `${process.env.FRONTEND_URL}/track-order?orderId=${order.orderId}`,
         subaccount: merchant.paystackSubAccountCode,
         bearer: 'subaccount',
+        channels: [channel],
         metadata: {
           order_id: order.orderId,
           customer_id: customer._id.toString(),
@@ -46,7 +54,6 @@ class PaymentSplitService {
         }
       };
 
-      console.log("PAYLOAD", payload)
 
       const response = await this.paystack.transaction.initialize(payload);
 
