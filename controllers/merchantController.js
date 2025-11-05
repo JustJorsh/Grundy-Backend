@@ -4,18 +4,18 @@ const User = require('../models/User');
 const Order = require('../models/Order');
 const SubAccountService = require('../services/subAccountService');
 const InventoryService = require('../services/inventoryService');
+const TerminalPaymentService = require('../services/terminalPaymentService');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 const subAccountService = new SubAccountService();
 const inventoryService = new InventoryService();
+const terminalPaymentService = new TerminalPaymentService();
 
 class MerchantController {
-
   async registerMerchant(req, res) {
     try {
       const merchantData = req.body;
-
 
       let user;
       if (merchantData.userId) {
@@ -72,12 +72,16 @@ class MerchantController {
       let paystackSubAccountCode = 'test-mode';
 
       try {
-      console.log('Registering merchant with data:', merchant);
-
+        console.log('Registering merchant with data:', merchant);
 
         const subAccount = await subAccountService.createSubAccount(merchant);
+         const terminalResult = await terminalService.createTerminalForMerchant(merchant);
         // Update merchant with sub-account code
         merchant.paystackSubAccountCode = subAccount.subaccount_code;
+        merchant.terminal = merchant.terminal || {};
+        merchant.terminal.id = terminalResult.terminalId || terminalResult.id;
+        merchant.terminal.serialNumber = terminalResult.serialNumber || terminalResult.serial_number;
+        merchant.terminal.name = terminalResult.name || terminalResult.terminalName;
         paystackSubAccountCode = subAccount.subaccount_code;
         await merchant.save();
         console.log(
@@ -86,7 +90,6 @@ class MerchantController {
         );
       } catch (paystackError) {
         console.error('Paystack integration failed:', paystackError.message);
-      
       }
 
       res.json({
@@ -233,8 +236,7 @@ class MerchantController {
 
       const merchantId = merchant._id;
 
-
-      console.log(req.user)
+      console.log(req.user);
       const { page = 1, limit = 10, status } = req.query;
 
       const query = { merchantId: merchantId };
@@ -243,8 +245,7 @@ class MerchantController {
       const orders = await Order.find(query)
         .sort({ createdAt: -1 })
         .limit(limit * 1)
-        .skip((page - 1) * limit)
-       
+        .skip((page - 1) * limit);
 
       const total = await Order.countDocuments(query);
 
@@ -266,9 +267,8 @@ class MerchantController {
 
   async updateProduct(req, res) {
     try {
-       const userId = req.user._id;
+      const userId = req.user._id;
       const merchant = await Merchant.findOne({ userId: userId });
-      
 
       const { productId } = req.params;
       const updates = req.body;
@@ -304,7 +304,7 @@ class MerchantController {
       const userId = req.user._id;
 
       const merchantId = await Merchant.findOne({ userId: userId });
-    
+
       const productData = req.body;
 
       const product = await inventoryService.addProduct(
@@ -328,10 +328,9 @@ class MerchantController {
 
   async getMerchantAnalytics(req, res) {
     try {
-       const userId = req.user
+      const userId = req.user;
 
       const merchant = await Merchant.findOne({ userId: userId });
-
 
       const totalOrders = await Order.countDocuments({
         'merchant.merchantId': merchant._id,
@@ -354,8 +353,7 @@ class MerchantController {
         'merchant.merchantId': merchant._id,
       })
         .sort({ createdAt: -1 })
-        .limit(5)
-        
+        .limit(5);
 
       res.json({
         success: true,
@@ -470,8 +468,6 @@ class MerchantController {
       const metadata = agg[0]?.metadata[0] || { total: 0 };
       const rows = agg[0]?.data || [];
 
-      
-
       const products = rows.map((r) => ({
         ...r.product,
         merchant: { id: r.merchantId, businessName: r.businessName },
@@ -542,6 +538,37 @@ class MerchantController {
       });
     } catch (error) {
       console.error('Get merchant products error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  async createTerminal(req, res) {
+    try {
+      const merchantId = req.params.merchantId || req.user.merchantId;
+
+      const merchant = await Merchant.findById(merchantId);
+      if (!merchant) {
+        return res.status(404).json({
+          success: false,
+          error: 'Merchant not found',
+        });
+      }
+
+      const terminalService = new TerminalPaymentService();
+      const terminal = await terminalService.createTerminalForMerchant(
+        merchant
+      );
+
+      res.json({
+        success: true,
+        terminal,
+        message: 'Terminal created successfully',
+      });
+    } catch (error) {
+      console.error('Create terminal error:', error);
       res.status(500).json({
         success: false,
         error: error.message,

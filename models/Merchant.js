@@ -40,6 +40,12 @@ const merchantSchema = new mongoose.Schema(
     paystackSubAccountCode: String,
     virtualTerminalCode: String,
     virtualTerminalId: String,
+    terminal: {
+      id: String,
+      serialNumber: String,
+      name: String,
+      status: String
+    },
 
     products: [
       {

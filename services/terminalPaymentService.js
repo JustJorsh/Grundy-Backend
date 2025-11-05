@@ -1,17 +1,12 @@
-// services/virtualTerminalService.js
+// services/terminalPaymentService.js
 const axios = require('axios');
 const Order = require('../models/Order');
 const Merchant = require('../models/Merchant');
-const User = require('../models/User');
-const Rider = require('../models/Rider');
 
-const PaymentSplitService = require('./paymentSplitService');
-
-class VirtualTerminalService {
+class TerminalPaymentService {
   constructor() {
     this.paystackBaseURL = 'https://api.paystack.co';
     this.secretKey = process.env.PAYSTACK_SECRET_KEY;
-    this.paymentSplitService = new PaymentSplitService();
   }
 
   async makePaystackRequest(method, endpoint, data = null) {
@@ -37,371 +32,140 @@ class VirtualTerminalService {
     }
   }
 
-  async createVirtualTerminalForOrder(order, merchant) {
+  async initiateTerminalPayment(order, merchant) {
     try {
-      if (!merchant.paystackSubAccountCode) {
-        throw new Error('Merchant does not have a Paystack sub-account');
+      if (!merchant.terminal?.id) {
+        throw new Error('Merchant does not have a terminal assigned');
       }
 
-      // reate a virtual terminal for this merchant if it doesn't exist
-      let terminalCode = merchant.virtualTerminalCode;
-      let merchantData = await Merchant.findById(order.merchantId);
-      let user = await User.findById(merchantData.userId);
-
-      console.log("USER", user)
-          
-      
-      if (!terminalCode) {
-        const terminalPayload = {
-          name: `${order.orderId}`,
-          destinations: user.phone ? [
-            {
-              target: user.phone,
-              name: `${merchantData.businessName.slice(0, 15)} Notifications`,
-            }
-          ] : [],
-          metadata: {
-            order_id: order.orderId,
-            merchant_id: merchant._id.toString(),
-            customer_id: order.customerId.toString(),
-            type: 'order_payment'
-          },
-          currency: merchant.currency || 'NGN',
-        };
-
-        
-
-        const terminalResponse = await this.makePaystackRequest('POST', '/virtual_terminal', terminalPayload);
-        
-        if (!terminalResponse.status) {
-          throw new Error(`Virtual terminal creation failed: ${terminalResponse.message}`);
-        }
-
-        terminalCode = terminalResponse.data.code;
-        
-        // Update merchant with virtual terminal code
-        await Merchant.findByIdAndUpdate(merchant._id, {
-          virtualTerminalCode: terminalCode,
-          virtualTerminalId: terminalResponse.data.id,
-        });
-      }
-
-      const merchantSharePercent = 90;
-      const platformSharePercent = 10;
-
-      
-      const splitPayload = {
-        name: `Split for Order ${order.orderId}`,
-        type: 'percentage',
-        currency: merchant.currency || 'NGN',
-        subaccounts: [
-          {
-            subaccount: merchant.paystackSubAccountCode,
-            share: merchantSharePercent,
-          },
- 
-        ],
-        bearer_type: 'subaccount',
-        bearer_subaccount: merchant.paystackSubAccountCode,
-      };
-
-      const splitResponse = await this.makePaystackRequest('POST', '/split', splitPayload);
-      
-      if (splitResponse.status) {
-        // Assign split code to virtual terminal
-        await this.makePaystackRequest(
-          'PUT', 
-          `/virtual_terminal/${terminalCode}/split_code`, 
-          { split_code: splitResponse.data.split_code }
-        );
-      }
-
-      // Update order with virtual terminal information
-      await Order.findByIdAndUpdate(order._id, {
-        'payment.virtualTerminalCode': terminalCode,
-        'payment.splitCode': splitResponse.data?.split_code,
-        'payment.subaccount': merchant.paystackSubAccountCode,
-        'payment.splitConfig': {
-          type: 'percentage',
-          merchantSharePercent,
-          platformSharePercent,
-          bearer: 'subaccount',
-        },
-        'payment.status': 'awaiting_payment',
-        'payment.paymentUrl': `https://terminal.paystack.com/${terminalCode}`,
-      });
-
-      return {
-        success: true,
-        terminalCode: terminalCode,
-        paymentUrl: `https://terminal.paystack.com/${terminalCode}`,
-        amount: order.payment.amount,
-        currency: merchant.currency || 'NGN',
-        instructions: `Visit https://terminal.paystack.com/${terminalCode} to complete your payment of ${order.payment.amount} ${merchant.currency || 'NGN'}`,
-        message: 'Virtual terminal created successfully',
-      };
-    } catch (error) {
-      console.error('Create virtual terminal for order error:', error);
-      throw new Error(`Virtual terminal setup failed: ${error.message}`);
-    }
-  }
-
-  async processVirtualTerminalPayment(terminalCode, paymentData) {
-    try {
-      // Get virtual terminal details to verify payment
-      const terminalResponse = await this.makePaystackRequest('GET', `/virtual_terminal/${terminalCode}`);
-      
-      if (!terminalResponse.status) {
-        throw new Error('Virtual terminal not found');
-      }
-      
-      const order = await Order.findOne({
-        'payment.virtualTerminalCode': terminalCode,
-        'payment.status': 'awaiting_payment'
-      });
-
-      if (!order) {
-        throw new Error('Order not found for virtual terminal');
-      }
-      
-      await this.paymentSplitService.processSuccessfulPayment({
-        reference: `VT_${terminalCode}_${Date.now()}`,
-        amount: order.payment.amount * 100,
-        currency: order.payment.currency || 'NGN',
+      // First create a payment request
+      const paymentRequest = await this.makePaystackRequest('POST', '/paymentrequest', {
+        customer: order.customer.email,
+        amount: Math.round(order.payment.amount * 100), // convert to kobo
+        description: `Payment for order ${order.orderId}`,
         metadata: {
-          terminal_code: terminalCode,
-          order_id: order.orderId
+          order_id: order.orderId,
+          merchant_id: merchant._id.toString()
         }
       });
 
-      // Update order status
-      await Order.findByIdAndUpdate(order._id, {
-        'payment.status': 'completed',
-        'payment.paidAt': new Date(),
-        'payment.transactionReference': `VT_${terminalCode}_${Date.now()}`,
-      });
+      if (!paymentRequest.status) {
+        throw new Error('Failed to create payment request');
+      }
 
-      return {
-        success: true,
-        order,
-        message: 'Virtual terminal payment processed successfully',
-      };
-    } catch (error) {
-      console.error('Virtual terminal payment processing error:', error);
-      throw new Error(`Virtual terminal payment processing failed: ${error.message}`);
-    }
-  }
-
-  async handleVirtualTerminalWebhook(event) {
-    try {
-      if (event.event === 'charge.success') {
-        const transaction = event.data;
-        
-        // Extract terminal code from metadata or reference
-        const terminalCode = transaction.metadata?.terminal_code || 
-                           transaction.reference?.split('_')[1];
-        
-        if (terminalCode) {
-          const order = await Order.findOne({
-            'payment.virtualTerminalCode': terminalCode,
-            'payment.status': 'awaiting_payment'
-          });
-
-          if (order) {
-           
-            await this.paymentSplitService.processSuccessfulPayment(transaction);
-
-            // Update order status
-            await Order.findByIdAndUpdate(order._id, {
-              'payment.status': 'completed',
-              'payment.paidAt': new Date(),
-              'payment.transactionReference': transaction.reference,
-              'payment.method': 'virtual_terminal',
-            });
-
-            console.log(`Virtual terminal payment completed for order ${order.orderId}`);
+      // Push the payment request to terminal
+      const terminalEvent = await this.makePaystackRequest(
+        'POST',
+        `/terminal/${merchant.terminal.id}/event`,
+        {
+          type: 'invoice',
+          action: 'process',
+          data: {
+            id: paymentRequest.data.id,
+            reference: paymentRequest.data.offline_reference
           }
         }
-      }
+      );
 
-      return { success: true, processed: true };
+      // Update order with payment details
+      await Order.findByIdAndUpdate(order._id, {
+        'payment.status': 'pending',
+        'payment.method': 'terminal',
+        'payment.terminalId': merchant.terminal.id,
+        'payment.requestId': paymentRequest.data.id,
+        'payment.offlineReference': paymentRequest.data.offline_reference,
+        'payment.eventId': terminalEvent.data.id
+      });
+
+      return {
+        success: true,
+        terminalId: merchant.terminal.id,
+        requestId: paymentRequest.data.id,
+        offlineReference: paymentRequest.data.offline_reference,
+        message: 'Payment initiated on terminal'
+      };
+
     } catch (error) {
-      console.error('Virtual terminal webhook error:', error);
+      console.error('Terminal payment initiation error:', error);
+      throw new Error(`Failed to initiate terminal payment: ${error.message}`);
+    }
+  }
+
+  async handleTerminalWebhook(event) {
+    try {
+      if (event.event === 'paymentrequest.success') {
+        const order = await Order.findOne({
+          'payment.offlineReference': event.data.offline_reference
+        });
+
+        if (!order) {
+          console.warn('Order not found for offline reference:', event.data.offline_reference);
+          return;
+        }
+
+        // Update order status
+        await Order.findByIdAndUpdate(order._id, {
+          'payment.status': 'completed',
+          'payment.paidAt': new Date(),
+          'payment.transactionId': event.data.id
+        });
+
+        return { success: true, orderId: order.orderId };
+      }
+    } catch (error) {
+      console.error('Terminal webhook processing error:', error);
       throw error;
     }
   }
 
- 
-
-  async createVirtualTerminal(terminalData) {
+  async getTerminalStatus(terminalId) {
     try {
-      const payload = {
-        name: terminalData.name,
-        destinations: terminalData.destinations || [],
-        metadata: terminalData.metadata ? JSON.stringify(terminalData.metadata) : null,
-        currency: terminalData.currency || 'NGN',
-        custom_fields: terminalData.custom_fields || [],
-      };
-
-      const response = await this.makePaystackRequest('POST', '/virtual_terminal', payload);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to create virtual terminal');
-      }
-
-      return {
-        success: true,
-        terminal: response.data,
-        message: 'Virtual terminal created successfully',
-      };
-    } catch (error) {
-      console.error('Create virtual terminal error:', error);
-      throw new Error(`Virtual terminal creation failed: ${error.message}`);
-    }
-  }
-
-  async getVirtualTerminal(terminalCode) {
-    try {
-      const response = await this.makePaystackRequest('GET', `/virtual_terminal/${terminalCode}`);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to fetch virtual terminal');
-      }
-
-      return {
-        success: true,
-        terminal: response.data,
-      };
-    } catch (error) {
-      console.error('Get virtual terminal error:', error);
-      throw new Error(`Failed to get virtual terminal: ${error.message}`);
-    }
-  }
-
-  async listVirtualTerminals(options = {}) {
-    try {
-      const queryParams = new URLSearchParams();
-      
-      if (options.status) queryParams.append('status', options.status);
-      if (options.perPage) queryParams.append('perPage', options.perPage.toString());
-      if (options.search) queryParams.append('search', options.search);
-      if (options.next) queryParams.append('next', options.next);
-      if (options.previous) queryParams.append('previous', options.previous);
-
-      const endpoint = `/virtual_terminal${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-      const response = await this.makePaystackRequest('GET', endpoint);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to fetch virtual terminals');
-      }
-
-      return {
-        success: true,
-        terminals: response.data,
-        meta: response.meta,
-      };
-    } catch (error) {
-      console.error('List virtual terminals error:', error);
-      throw new Error(`Failed to list virtual terminals: ${error.message}`);
-    }
-  }
-
-  async updateVirtualTerminal(terminalCode, updateData) {
-    try {
-      const payload = {
-        name: updateData.name,
-      };
-
-      const response = await this.makePaystackRequest('PUT', `/virtual_terminal/${terminalCode}`, payload);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to update virtual terminal');
-      }
-
-      return {
-        success: true,
-        terminal: response.data,
-        message: 'Virtual terminal updated successfully',
-      };
-    } catch (error) {
-      console.error('Update virtual terminal error:', error);
-      throw new Error(`Failed to update virtual terminal: ${error.message}`);
-    }
-  }
-
-  async deactivateVirtualTerminal(terminalCode) {
-    try {
-      const response = await this.makePaystackRequest('PUT', `/virtual_terminal/${terminalCode}/deactivate`);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to deactivate virtual terminal');
-      }
-
-      return {
-        success: true,
-        message: response.message || 'Virtual terminal deactivated successfully',
-      };
-    } catch (error) {
-      console.error('Deactivate virtual terminal error:', error);
-      throw new Error(`Failed to deactivate virtual terminal: ${error.message}`);
-    }
-  }
-
-  async assignDestination(terminalCode, destinations) {
-    try {
-      const payload = {
-        destinations: destinations,
-      };
-
-      const response = await this.makePaystackRequest('POST', `/virtual_terminal/${terminalCode}/destination/assign`, payload);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to assign destination');
-      }
-
-      return {
-        success: true,
-        destinations: response.data,
-        message: 'Destination assigned successfully',
-      };
-    } catch (error) {
-      console.error('Assign destination error:', error);
-      throw new Error(`Failed to assign destination: ${error.message}`);
-    }
-  }
-
-  async addSplitCode(terminalCode, splitCode) {
-    try {
-      const payload = {
-        split_code: splitCode,
-      };
-
-      const response = await this.makePaystackRequest('PUT', `/virtual_terminal/${terminalCode}/split_code`, payload);
-
-      if (!response.status) {
-        throw new Error(response.message || 'Failed to add split code');
-      }
-
-      return {
-        success: true,
-        splitConfig: response.data,
-        message: 'Split code added successfully',
-      };
-    } catch (error) {
-      console.error('Add split code error:', error);
-      throw new Error(`Failed to add split code: ${error.message}`);
-    }
-  }
-
-  async getTerminalStatus(terminalCode) {
-    try {
-      const response = await this.makePaystackRequest('GET', `/virtual_terminal/${terminalCode}`);
+      const response = await this.makePaystackRequest('GET', `/terminal/${terminalId}`);
       return response.data;
     } catch (error) {
       console.error('Get terminal status error:', error);
       throw new Error(`Failed to get terminal status: ${error.message}`);
     }
   }
+
+  async createTerminalForMerchant(merchant) {
+    try {
+      if (!merchant) {
+        throw new Error('Merchant details required');
+      }
+
+      const terminalPayload = {
+        name: `${merchant.businessName} Terminal`,
+        description: `Terminal for ${merchant.businessName}`,
+        address: merchant.market?.location?.address || 'Address not specified'
+      };
+
+      const response = await this.makePaystackRequest('POST', '/terminal', terminalPayload);
+
+      if (!response.status) {
+        throw new Error('Terminal creation failed');
+      }
+
+      // Update merchant with terminal details
+      await Merchant.findByIdAndUpdate(merchant._id, {
+        'terminal.id': response.data.id,
+        'terminal.serialNumber': response.data.serial_number,
+        'terminal.name': response.data.name,
+        'terminal.status': response.data.status
+      });
+
+      return {
+        success: true,
+        terminalId: response.data.id,
+        serialNumber: response.data.serial_number,
+        name: response.data.name,
+        status: response.data.status
+      };
+    } catch (error) {
+      console.error('Terminal creation error:', error);
+      throw new Error(`Failed to create terminal: ${error.message}`);
+    }
+  }
 }
 
-module.exports = VirtualTerminalService;
+module.exports = TerminalPaymentService;

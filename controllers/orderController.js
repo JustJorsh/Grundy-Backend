@@ -214,7 +214,7 @@ async function createOrder(req, res) {
         paymentData = await bankTransferService.createVirtualAccountForOrder(order, merchant, "payWithTransfer");
         break;
       case 'terminal_delivery':
-        paymentData = await terminalPaymentService.createVirtualTerminalForOrder(order, merchant);
+        paymentData = await terminalPaymentService.initiateTerminalPayment(order, merchant);
         break;
       default:
         throw new Error('Invalid payment method');
