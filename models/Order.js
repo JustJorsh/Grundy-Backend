@@ -41,18 +41,22 @@ const orderSchema = new mongoose.Schema({
 
   // --- Payment --- //
   payment: {
-    amount: Number,
-    status: {
-      type: String,
-      enum: ['pending', 'processing', 'completed', 'failed'],
-      default: 'pending'
-    },
     method: {
       type: String,
-      enum: ['card', 'transfer', 'terminal'],
+      enum: ['online', 'bank_transfer_delivery', 'terminal_delivery'],
       required: true
     },
-    terminalId: String,
+    status: {
+      type: String,
+      enum: ['pending', 'awaiting_payment', 'paid', 'failed', 'refunded'],
+      default: 'pending'
+    },
+    amount: Number,
+    platformFee: Number,
+    merchantAmount: Number,
+    paystackReference: String,
+    paidAt: Date,
+     terminalId: String,
     requestId: String,
     offlineReference: String,
     eventId: String,
